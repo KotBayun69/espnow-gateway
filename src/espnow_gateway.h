@@ -90,9 +90,11 @@ void setup() {
 }
 
 void loop() {
+  uint8_t qos = 1;
+  bool retain = true;
   // Handle incoming serial data
   if (softSerial.available() >= (int) sizeof(message)) {
-    softSerial.readBytes((char*)&message, sizeof(message));
+    softSerial.readBytes((char*)&message, (size_t) sizeof(message));
     
     Serial.print("Received: ");
     Serial.println(message.payload);
@@ -100,20 +102,12 @@ void loop() {
     if (mqttConnected) {
       String payload = String("{\"counter\":") + message.counter 
                      + ",\"data\":\"" + message.payload + "\"}";
-      mqttClient.publish(MQTT_TOPIC, 1, true, payload.c_str());
+      mqttClient.publish(MQTT_TOPIC, qos, retain, payload.c_str());
       Serial.println("Published to MQTT");
     } else {
       Serial.println("MQTT not connected. Message discarded");
     }
   }
-  delay(5000);  // Adjust delay as needed
-  if (mqttConnected) {
-      String payload = String("Test message at ") + millis();
-      mqttClient.publish(MQTT_TOPIC, 1, false, payload.c_str());
-      Serial.println("Published to MQTT");
-    } else {
-      Serial.println("MQTT not connected. Message discarded");
-    }
 
   // Periodic connection check
   static unsigned long lastCheck = 0;

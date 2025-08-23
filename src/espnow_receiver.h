@@ -13,15 +13,29 @@
 
 #include <ESP8266WiFi.h>
 #include <espnow.h>
+#include <SoftwareSerial.h>
 
 // Create a struct_message called myData
 struct_message myData;
 
+// Initialize Softwareserial
+SoftwareSerial softSerial(SOFT_RX, SOFT_TX);
+
+// Send serial data to the gateway
+void sendData() {
+  softSerial.write((uint8_t*)&myData, sizeof(myData));
+    
+  // Toggle built-in LED to indicate activity
+  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    
+  delay(10); // Small delay to prevent watchdog reset
+}
+
 // Callback function that will be executed when data is received
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
+  
   memcpy(&myData, incomingData, sizeof(myData));
-  // Use assignment instead of memcpy to avoid the warning 
-//   myData = *(struct_message*)incomingData;
+
   Serial.print("Bytes received: ");
   Serial.println(len);
   Serial.print("Char: ");
@@ -33,11 +47,16 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   Serial.print("Bool: ");
   Serial.println(myData.e);
   Serial.println();
+
+  sendData();
 }
  
 void setup() {
   // Initialize Serial Monitor
   Serial.begin(115200);
+  Serial.println();
+  // Initialize Softwareserial Monitor
+  softSerial.begin(BAUDRATE);
   
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
