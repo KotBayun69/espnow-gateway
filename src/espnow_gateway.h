@@ -17,6 +17,8 @@ AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 Ticker wifiReconnectTimer;
 bool mqttConnected = false;  // Track connection state
+// Define WiFi event handlers
+WiFiEventHandler gotIpEventHandler, disconnectedEventHandler;
 
 void connectToWifi() {
   Serial.println("Connecting to Wi-Fi...");
@@ -30,23 +32,17 @@ void connectToMqtt() {
   }
 }
 
-void WiFiEvent(WiFiEvent_t event) {
-  Serial.printf("[WiFi-event] event: %d\n", event);
-  
-  switch(event) {
-    case WIFI_EVENT_STAMODE_GOT_IP:
-      Serial.print("WiFi connected. IP: ");
-      Serial.println(WiFi.localIP());
-      connectToMqtt();
-      break;
-      
-    case WIFI_EVENT_STAMODE_DISCONNECTED:
-      Serial.println("WiFi lost connection");
-      mqttConnected = false;
-      mqttReconnectTimer.detach();
-      wifiReconnectTimer.once(2, connectToWifi);
-      break;
-  }
+void onStationModeGotIP(const WiFiEventStationModeGotIP& event) {
+  Serial.print("WiFi connected. IP: ");
+  Serial.println(event.ip);
+  connectToMqtt();
+}
+
+void onStationModeDisconnected(const WiFiEventStationModeDisconnected& event) {
+  Serial.println("WiFi lost connection");
+  mqttConnected = false;
+  mqttReconnectTimer.detach();
+  wifiReconnectTimer.once(2, connectToWifi);
 }
 
 void onMqttConnect(bool sessionPresent) {
@@ -75,8 +71,9 @@ void setup() {
   // Enable pull-ups for SoftwareSerial stability
   pinMode(SOFT_RX, INPUT_PULLUP);
   
-  // Configure WiFi
-  WiFi.onEvent(WiFiEvent);
+  // Configure WiFi with event handlers
+  gotIpEventHandler = WiFi.onStationModeGotIP(&onStationModeGotIP);
+  disconnectedEventHandler = WiFi.onStationModeDisconnected(&onStationModeDisconnected);
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   
@@ -94,7 +91,7 @@ void setup() {
 
 void loop() {
   // Handle incoming serial data
-  if (softSerial.available() >= sizeof(message)) {
+  if (softSerial.available() >= (int) sizeof(message)) {
     softSerial.readBytes((char*)&message, sizeof(message));
     
     Serial.print("Received: ");
