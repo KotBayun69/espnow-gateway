@@ -20,7 +20,7 @@ struct_message myData;
 // Callback function that will be executed when data is received
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   memcpy(&myData, incomingData, sizeof(myData));
-  // Use assignment instead of memcpy to avoid the warning
+  // Use assignment instead of memcpy to avoid the warning 
 //   myData = *(struct_message*)incomingData;
   Serial.print("Bytes received: ");
   Serial.println(len);
