@@ -10,19 +10,16 @@
   The above copyright notice and this permission notice shall be included in all
   copies or substantial portions of the Software.
 */
-
-#include <ESP8266WiFi.h>
-#include <espnow.h>
 #include <SoftwareSerial.h>
 
 // Create a struct_message called myData
-struct_message myData;
+EspNowMessage myData;
 
 // Initialize Softwareserial
 SoftwareSerial softSerial(SOFT_RX, SOFT_TX);
 
 // Send serial data to the gateway
-void sendData() {
+void sendToSerial() {
   softSerial.write((uint8_t*)&myData, sizeof(myData));
     
   // Toggle built-in LED to indicate activity
@@ -35,20 +32,17 @@ void sendData() {
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
   
   memcpy(&myData, incomingData, sizeof(myData));
-
-  Serial.print("Bytes received: ");
-  Serial.println(len);
-  Serial.print("Char: ");
-  Serial.println(myData.a);
-  Serial.print("Int: ");
-  Serial.println(myData.b);
-  Serial.print("Float: ");
-  Serial.println(myData.c);
-  Serial.print("Bool: ");
-  Serial.println(myData.e);
+  
+  Serial.println(myData.data.sensor_type);
+  Serial.println(myData.data.state);
+  Serial.println(myData.data.device_class);
+  Serial.println(myData.data.unit);
+  Serial.println(myData.rssi);
+  Serial.println(myData.battery);
+  Serial.println(myData.timestamp);
   Serial.println();
-
-  sendData();
+  
+  sendToSerial();
 }
  
 void setup() {

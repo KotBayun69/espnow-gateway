@@ -1,5 +1,7 @@
 #include "settings.h"
-
+#ifdef GETMACADDRESS
+  #include "get_mac_address.h"
+#endif
 /*
   Rui Santos
   Complete project details at https://RandomNerdTutorials.com/esp-now-esp8266-nodemcu-arduino-ide/
@@ -15,10 +17,11 @@
 #include <esp_now.h>
 
 // Create a struct_message called myData
-struct_message myData;
+EspNowMessage myData;
 
-unsigned long lastTime = 0;  
-unsigned long timerDelay = 2000;  // send readings timer
+unsigned long lastSendTime  = 0;  
+const unsigned long sendInterval  = 5000;  // send readings timer
+int testCounter = 0; 
 
 // Callback when data is sent
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t sendStatus) {
@@ -30,7 +33,7 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t sendStatus) {
     Serial.println("Delivery fail");
   }
 }
- 
+
 void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
@@ -58,21 +61,49 @@ void setup() {
   // get the status of Trasnmitted packet
   // esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
   esp_now_register_send_cb(OnDataSent);
-  
 }
  
 void loop() {
-  if ((millis() - lastTime) > timerDelay) {
-    // Set values to send
-    strcpy(myData.a, "THIS IS A CHAR");
-    myData.b = random(1,20);
-    myData.c = 1.2;
-    myData.d = "Hello";
-    myData.e = false;
+  checkDataSize();
+  delay(5000);
+  // if (millis() - lastSendTime >= sendInterval) {
+  //   lastSendTime = millis();
+  //   testCounter++;
+    
+  //   // Temperature sensor
+  //   myData.sensor_count = 1;
+  //   strcpy(myData.data[0].sensor_type, "temperature");
+  //   dtostrf(20.0 + (random(0, 200) / 10.0), 1, 1, myData.data[0].state); // 20.0-40.0°C
+  //   strcpy(myData.data[0].device_class, "temperature");
+  //   strcpy(myData.data[0].unit, "°C");
 
-    // Send message via ESP-NOW
-    esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+  //   // Update timestamp
+  //   myData.timestamp = millis();
+    
+  //   // Print debug info
+  //   Serial.print("Sent test message #");
+  //   Serial.print(testCounter);
+  //   Serial.print(" with ");
+  //   Serial.print(myData.sensor_count);
+  //   Serial.println(" sensors");
+    
+  //   for (int i = 0; i < myData.sensor_count; i++) {
+  //     Serial.print("  ");
+  //     Serial.print(myData.data[i].sensor_type);
+  //     Serial.print(": ");
+  //     Serial.print(myData.data[i].state);
+  //     Serial.print(" ");
+  //     Serial.println(myData.data[i].unit);
+  //   }
 
-    lastTime = millis();
-  }
+  //   // Send message via ESP-NOW
+  //   esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+
+  //   // Toggle built-in LED to indicate transmission
+  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
+  //   lastSendTime = millis();
+
+    // delay(10); // Small delay to prevent watchdog reset
+  // }
 }

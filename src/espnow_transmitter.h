@@ -11,14 +11,13 @@
   copies or substantial portions of the Software.
 */
 
-#include <ESP8266WiFi.h>
-#include <espnow.h>
-
 // Create a struct_message called myData
-struct_message myData;
+EspNowMessage myData;
 
-unsigned long lastTime = 0;  
-unsigned long timerDelay = 2000;  // send readings timer
+unsigned long lastSendTime = 0;  
+const unsigned long sendInterval = 10000;  // send readings timer
+int testCounter = 0;
+
 
 // Callback when data is sent
 void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
@@ -51,19 +50,60 @@ void setup() {
   
   // Register peer
   esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+
+  // Initialize the message structure with dummy data
+  strcpy(myData.device_id, "test_sensor");
+  strcpy(myData.device_name, "Test Sensor");
+  myData.rssi = -65;
+  myData.battery = 85;
+
+  // Verify structure size
+  Serial.print("Message size: ");
+  Serial.print(sizeof(EspNowMessage));
+  Serial.println(" bytes");
+  
+  Serial.println("ESP-NOW Dummy Data Transmitter");
+  Serial.println("==============================");
 }
  
 void loop() {
-  if ((millis() - lastTime) > timerDelay) {
-    // Set values to send
-    strcpy(myData.a, "THIS IS A CHAR");
-    myData.b = random(1,20);
-    myData.c = 1.2;
-    myData.e = false;
+  if ((millis() - lastSendTime) >= sendInterval) {
+    lastSendTime = millis();
+    testCounter++;
+
+    // Dummy Temperature sensor
+    strcpy(myData.data.sensor_type, "temperature");
+    dtostrf(20.0 + (random(0, 200) / 10.0), 1, 1, myData.data.state); // 20.0-40.0°C
+    strcpy(myData.data.device_class, "temperature");
+    strcpy(myData.data.unit, "°C");
+
+    // Update timestamp
+    myData.timestamp = millis();
+
+    // Print debug info
+    Serial.print("Sent test message #");
+    Serial.print(testCounter);
+    Serial.print(": ");
+    Serial.print(myData.data.sensor_type);
+    Serial.print(" = ");
+    Serial.print(myData.data.state);
+    Serial.println(myData.data.unit);
 
     // Send message via ESP-NOW
-    esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+   int sendStatus = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
 
-    lastTime = millis();
+   if (sendStatus == 0) {
+      Serial.println("Send success");
+    } else {
+      Serial.print("Send error: ");
+      Serial.println(sendStatus);
+    }
+
+    // Toggle built-in LED to indicate transmission
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   }
+  
+  delay(10); // Small delay to prevent watchdog reset
+
+    
 }

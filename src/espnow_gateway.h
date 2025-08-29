@@ -1,10 +1,14 @@
 #include "settings.h"
 
-#include <ESP8266WiFi.h>
+#ifdef GETMACADDRESS
+  #include "get_mac_address.h"
+#endif
+
 #include <AsyncMqttClient.h>
 #include <SoftwareSerial.h>
 #include <Ticker.h>
 #include <time.h>
+#include <ArduinoJson.h>
 
 // NTP Configuration
 const char* ntpServer = "pool.ntp.org";
@@ -19,18 +23,91 @@ unsigned long systemStartTime = 0;
 
 SoftwareSerial softSerial(SOFT_RX, SOFT_TX);
 
-struct EspNowMessage {
-  uint32_t counter;
-  char payload[32];
-};
-
-EspNowMessage message;
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 Ticker wifiReconnectTimer;
 bool mqttConnected = false;  // Track connection state
 // Define WiFi event handlers
 WiFiEventHandler gotIpEventHandler, disconnectedEventHandler;
+
+//function declarations
+void connectToWifi();
+void connectToMqtt();
+void onMqttConnect(bool sessionPresent);
+void onStationModeGotIP(const WiFiEventStationModeGotIP& event);
+void onStationModeDisconnected(const WiFiEventStationModeDisconnected& event);
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
+bool syncTime();
+String getTimestamp();
+void processSensorData(EspNowMessage message);
+
+
+void setup() {
+  Serial.begin(115200);
+  // Enable pull-ups for SoftwareSerial stability
+  pinMode(SOFT_RX, INPUT_PULLUP);
+  softSerial.begin(BAUDRATE);
+
+  // Record system start time for uptime fallback
+  systemStartTime = millis();
+  
+  // Configure WiFi with event handlers
+  gotIpEventHandler = WiFi.onStationModeGotIP(&onStationModeGotIP);
+  disconnectedEventHandler = WiFi.onStationModeDisconnected(&onStationModeDisconnected);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  
+  // Configure MQTT client with credentials
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);  // Add authentication
+  mqttClient.setClientId("ESP-NOW-Gateway");  // Unique client ID
+  
+  // Start connection sequence
+  Serial.println("\nInitializing...");
+  connectToWifi();
+  connectToMqtt();
+
+  // Initial time sync
+  if (WiFi.status() == WL_CONNECTED) {
+    syncTime();
+  }
+}
+
+void loop() {
+  // Handle incoming serial data
+  if (softSerial.available() > 0) {
+    EspNowMessage message;
+    softSerial.readBytes((uint8_t*)&message, (size_t) sizeof(message));
+    Serial.print("Received data from sensor: ");
+    Serial.println(message.data.state);
+    processSensorData(message);
+  }
+
+  // Periodic connection check
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck > 10000) {
+    lastCheck = millis();
+    
+    if (!WiFi.isConnected()) {
+      Serial.println("Reconnecting WiFi...");
+      connectToWifi();
+    }
+    else if (!mqttConnected) {
+      Serial.println("Reconnecting MQTT...");
+      connectToMqtt();
+    }
+  }
+
+  // Regular time synchronization
+  if (WiFi.status() == WL_CONNECTED && millis() - lastNtpSync > ntpSyncInterval) {
+    syncTime();
+    lastNtpSync = millis();
+  }
+}
+
+// Functions definitions
 
 void connectToWifi() {
   Serial.println("Connecting to Wi-Fi...");
@@ -41,6 +118,7 @@ void connectToMqtt() {
   if (WiFi.isConnected() && !mqttConnected) {
     Serial.println("Connecting to MQTT...");
     mqttClient.connect();
+    // mqtt.loop()
   }
 }
 
@@ -62,6 +140,7 @@ void onMqttConnect(bool sessionPresent) {
   Serial.println("MQTT connected");
   Serial.println("Gateway ready. Waiting for sensor data...");
 }
+
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   mqttConnected = false;
@@ -113,78 +192,43 @@ String getTimestamp() {
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  softSerial.begin(BAUDRATE);
+void processSensorData(EspNowMessage message) {
+  
+  DynamicJsonDocument doc(sizeof(message));
 
-  // Record system start time for uptime fallback
-  systemStartTime = millis();
+  // Add sensor data fields
+  doc["state"] = message.data.state;
+  doc["device_class"] = message.data.device_class;
+  doc["unit_of_measurement"] = message.data.unit;
   
-  // Enable pull-ups for SoftwareSerial stability
-  pinMode(SOFT_RX, INPUT_PULLUP);
+  // Add device metadata
+  doc["device_id"] = message.device_id;
+  doc["device_name"] = message.device_name;
   
-  // Configure WiFi with event handlers
-  gotIpEventHandler = WiFi.onStationModeGotIP(&onStationModeGotIP);
-  disconnectedEventHandler = WiFi.onStationModeDisconnected(&onStationModeDisconnected);
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  // Add signal and battery info
+  doc["rssi"] = message.rssi;
+  doc["battery"] = message.battery;
   
-  // Configure MQTT client with credentials
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);  // Add authentication
-  mqttClient.setClientId("ESP-NOW-Gateway");  // Unique client ID
+  // Add timestamp (if needed)
+  doc["timestamp"] = getTimestamp(); // Use your timestamp function
   
-  // Start connection sequence
-  Serial.println("\nInitializing...");
-  connectToWifi();
-  connectToMqtt();
-
-  // Initial time sync
-  if (WiFi.status() == WL_CONNECTED) {
-    syncTime();
-  }
-}
-
-void loop() {
+  // Create topic name using device ID and sensor type
+  String topic = String(MQTT_TOPIC) + "/" + 
+                  String(message.device_id) + "/" + 
+                  String(message.data.sensor_type);
+  
+  // Serialize and publish
+  String payload;
+  serializeJson(doc, payload);
   uint8_t qos = 1;
   bool retain = true;
-  // Handle incoming serial data
-  if (softSerial.available() >= (int) sizeof(message)) {
-    softSerial.readBytes((char*)&message, (size_t) sizeof(message));
-    
-    Serial.print("Received: ");
-    Serial.println(message.payload);
-    
-    if (mqttConnected) {
-      String payload = String("{\"counter\":") + message.counter 
-                     + ",\"data\":\"" + message.payload + "\"}";
-      mqttClient.publish(MQTT_TOPIC, qos, retain, payload.c_str());
-      Serial.println("Published to MQTT");
-    } else {
-      Serial.println("MQTT not connected. Message discarded");
-    }
-  }
-
-  // Periodic connection check
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck > 10000) {
-    lastCheck = millis();
-    
-    if (!WiFi.isConnected()) {
-      Serial.println("Reconnecting WiFi...");
-      connectToWifi();
-    }
-    else if (!mqttConnected) {
-      Serial.println("Reconnecting MQTT...");
-      connectToMqtt();
-    }
-  }
-
-  // Regular time synchronization
-  if (WiFi.status() == WL_CONNECTED && millis() - lastNtpSync > ntpSyncInterval) {
-    syncTime();
-    lastNtpSync = millis();
+  if (mqttClient.publish(topic.c_str(), qos, retain, payload.c_str()) != 0) {
+    Serial.print("Published to ");
+    Serial.print(topic);
+    Serial.print(": ");
+    Serial.println(payload);
+  } else {
+    Serial.print("Failed to publish to ");
+    Serial.println(topic);
   }
 }
